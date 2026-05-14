@@ -6,6 +6,9 @@ const DAEMON_PORT = Number(process.env.OD_PORT) || 7456;
 const DAEMON_ORIGIN = `http://127.0.0.1:${DAEMON_PORT}`;
 
 const isProd = process.env.NODE_ENV !== 'development';
+const webOutputMode = process.env.OD_WEB_OUTPUT_MODE;
+const isServerOutput = webOutputMode === 'server' || webOutputMode === 'standalone';
+const shouldStaticExport = isProd && !isServerOutput;
 
 const WEB_ROOT = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_ROOT = dirname(dirname(WEB_ROOT));
@@ -18,7 +21,7 @@ function resolveDistDir(defaultValue: string) {
   return toPosixPath(isAbsolute(configured) ? relative(WEB_ROOT, configured) || '.' : configured);
 }
 
-const DIST_DIR = resolveDistDir(isProd ? '.next' : '.next');
+const DIST_DIR = resolveDistDir(isProd ? (shouldStaticExport ? 'out' : '.next') : '.next');
 
 function resolveDevTsconfigPath() {
   const configured = process.env.OD_WEB_TSCONFIG_PATH;
@@ -37,21 +40,30 @@ const nextConfig: NextConfig = {
   },
   ...(DEV_TSCONFIG_PATH ? { typescript: { tsconfigPath: DEV_TSCONFIG_PATH } } : {}),
   distDir: DIST_DIR,
-  output: 'standalone',
-  ...(!isProd
+  ...(shouldStaticExport
     ? {
-        async rewrites() {
-          return [
-            { source: '/api/:path*', destination: `${DAEMON_ORIGIN}/api/:path*` },
-            { source: '/artifacts/:path*', destination: `${DAEMON_ORIGIN}/artifacts/:path*` },
-            { source: '/frames/:path*', destination: `${DAEMON_ORIGIN}/frames/:path*` },
-          ];
-        },
-        devIndicators: {
-          position: 'bottom-right',
-        },
+        output: 'export' as const,
+        trailingSlash: true,
+        images: { unoptimized: true },
       }
-    : {}),
+    : webOutputMode === 'standalone'
+      ? {
+          output: 'standalone' as const,
+        }
+      : !isProd
+        ? {
+            async rewrites() {
+              return [
+                { source: '/api/:path*', destination: `${DAEMON_ORIGIN}/api/:path*` },
+                { source: '/artifacts/:path*', destination: `${DAEMON_ORIGIN}/artifacts/:path*` },
+                { source: '/frames/:path*', destination: `${DAEMON_ORIGIN}/frames/:path*` },
+              ];
+            },
+            devIndicators: {
+              position: 'bottom-right',
+            },
+          }
+        : {}),
 };
 
 export default nextConfig;
